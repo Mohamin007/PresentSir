@@ -10,7 +10,10 @@ export default function AdminLayout({
 }) {
   return (
     <SidebarProvider defaultOpen={true}>
-      <OrgAwareSidebar role="admin" />
+      <OrgAwareSidebar 
+        role="admin" 
+        user={{ name: "Dr. Robert Hayes", email: "r.hayes@university.edu" }}
+      />
       <SidebarInset>
         <header className="flex h-14 items-center gap-4 border-b bg-background px-6">
           <SidebarTrigger className="-ml-2" />

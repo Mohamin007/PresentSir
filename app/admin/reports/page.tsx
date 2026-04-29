@@ -1,12 +1,10 @@
 "use client"
 
-import { useMemo } from "react"
-import { Download } from "lucide-react"
+import { Download, Lightbulb } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { departmentHeatmap, departments, teachers, rooms, atRiskStudents } from "@/lib/data"
+import { departmentHeatmap, adminAiInsights } from "@/lib/data"
 import { cn } from "@/lib/utils"
-import { AIInsightsPanel } from "@/components/ai-insights-panel"
 
 const weeks = ["Week 1", "Week 2", "Week 3", "Week 4"]
 
@@ -19,23 +17,6 @@ function getHeatmapColor(value: number) {
 }
 
 export default function ReportsPage() {
-  const buildPrompt = useMemo(() => {
-    return () => `You are an AI reporting assistant for a university admin.
-
-Review the attendance trends below and return a concise report with:
-1. The departments or subjects with the worst attendance
-2. Any risk students or patterns that need intervention
-3. 3 practical recommendations for the admin
-
-Department heatmap: ${JSON.stringify(departmentHeatmap)}
-Departments: ${JSON.stringify(departments)}
-Teachers: ${JSON.stringify(teachers)}
-Rooms: ${JSON.stringify(rooms)}
-At-risk students: ${JSON.stringify(atRiskStudents)}
-
-Keep the response short, clear, and actionable.`
-  }, [])
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -122,12 +103,33 @@ Keep the response short, clear, and actionable.`
         </CardContent>
       </Card>
 
-      <AIInsightsPanel
-        title="AI Report"
-        description="Automated analysis of attendance trends"
-        buttonLabel="Generate AI Report"
-        buildPrompt={buildPrompt}
-      />
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+              <Lightbulb className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle>AI Insights</CardTitle>
+              <CardDescription>Automated analysis of attendance trends</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-foreground leading-relaxed">{adminAiInsights.summary}</p>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">Key Observations:</p>
+            <ul className="space-y-2">
+              {adminAiInsights.trends.map((trend, index) => (
+                <li key={index} className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <span className="text-primary mt-1">•</span>
+                  {trend}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

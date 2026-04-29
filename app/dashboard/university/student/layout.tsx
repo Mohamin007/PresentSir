@@ -10,7 +10,10 @@ export default function UniversityStudentLayout({
 }) {
   return (
     <SidebarProvider defaultOpen={true}>
-      <OrgAwareSidebar role="student" />
+      <OrgAwareSidebar
+        role="student"
+        user={{ name: "Alex Johnson", email: "alex@university.edu" }}
+      />
       <SidebarInset>
         <header className="flex h-14 items-center gap-4 border-b bg-background px-6">
           <SidebarTrigger className="-ml-2" />

@@ -12,7 +12,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { NotificationsPopover } from "@/components/notifications-popover"
-import { AIInsightsPanel } from "@/components/ai-insights-panel"
 
 type ManagerSection = "dashboard" | "teams" | "meetings" | "employees" | "reports" | "settings"
 type EmployeeSection = "dashboard" | "attendance" | "meetings" | "settings"
@@ -64,25 +63,13 @@ export function CompanyDashboardShell({ userRole }: { userRole: string }) {
   const [managerSection, setManagerSection] = useState<ManagerSection>("dashboard")
   const [employeeSection, setEmployeeSection] = useState<EmployeeSection>("dashboard")
 
-  const [teams, setTeams] = useState<Team[]>([
-    { id: "t1", name: "Engineering", members: 12, punctuality: 93 },
-    { id: "t2", name: "Product", members: 6, punctuality: 88 },
-    { id: "t3", name: "Design", members: 4, punctuality: 91 },
-  ])
+  const [teams, setTeams] = useState<Team[]>([])
 
-  const [meetings, setMeetings] = useState<Meeting[]>([
-    { id: "m1", name: "Weekly Standup - Eng", datetime: "2026-04-28T09:30:00", location: "Room A", teamId: "t1", attendees: ["e1", "e2", "e3"] },
-    { id: "m2", name: "Product Sync", datetime: "2026-04-28T11:00:00", location: "Zoom", teamId: "t2", attendees: ["e4", "e5"] },
-  ])
+  const [meetings, setMeetings] = useState<Meeting[]>([])
 
-  const [employees, setEmployees] = useState<Employee[]>([
-    { id: "e1", name: "Priya Patel", email: "priya@company.com", teamId: "t1", todayStatus: "Present", punctuality: 95, lastSeen: "10:05 AM" },
-    { id: "e2", name: "Aditya Rao", email: "aditya@company.com", teamId: "t1", todayStatus: "Late", punctuality: 89, lastSeen: "9:55 AM" },
-    { id: "e3", name: "Nina Gupta", email: "nina@company.com", teamId: "t1", todayStatus: "Present", punctuality: 92, lastSeen: "9:30 AM" },
-    { id: "e4", name: "Sam Carter", email: "sam@company.com", teamId: "t2", todayStatus: "Absent", punctuality: 84, lastSeen: "Yesterday" },
-  ])
+  const [employees, setEmployees] = useState<Employee[]>([])
 
-  const [activity, setActivity] = useState([{ id: "a1", text: "Priya Patel checked in for Standup", time: "5m ago" }, { id: "a2", text: "Aditya Rao was marked late", time: "20m ago" }, { id: "a3", text: "Product Sync scheduled", time: "1h ago" }])
+  const [activity, setActivity] = useState<{ id: string; text: string; time: string }[]>([])
 
   const [teamDialogOpen, setTeamDialogOpen] = useState(false)
   const [teamForm, setTeamForm] = useState({ name: "", description: "" })
@@ -188,20 +175,6 @@ export function CompanyDashboardShell({ userRole }: { userRole: string }) {
 
   const NextMeeting = useMemo(() => meetings.slice().sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime())[0], [meetings])
 
-  const buildWorkforcePrompt = () => {
-    return `You are an AI workforce assistant for a company manager.
-
-Summarize the attendance and punctuality data below in a short paragraph and then give 3 recommendations.
-Focus on punctuality patterns, frequent absentees, and actions the manager can take.
-
-Teams: ${JSON.stringify(teams)}
-Employees: ${JSON.stringify(employees)}
-Meetings: ${JSON.stringify(meetings)}
-Recent activity: ${JSON.stringify(activity)}
-
-Keep the response concise and practical.`
-  }
-
   const ManagerNav = (
     <nav className="space-y-2 p-3">
       <button onClick={() => setManagerSection("dashboard")} className={cn("w-full text-left rounded px-3 py-2", managerSection === "dashboard" ? "bg-primary text-primary-foreground" : "hover:bg-muted")}>Dashboard</button>
@@ -262,12 +235,6 @@ Keep the response concise and practical.`
                       <Card><CardHeader><CardTitle>On Time %</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold">{Math.round((employees.reduce((s, e) => s + e.punctuality, 0) / employees.length) || 0)}%</div></CardContent></Card>
                       <Card><CardHeader><CardTitle>Late Arrivals</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold">{employees.filter((e) => e.todayStatus === "Late").length}</div></CardContent></Card>
                     </div>
-                    <AIInsightsPanel
-                      title="AI Workforce Insights"
-                      description="Analyze punctuality patterns and attendance risks"
-                      buttonLabel="Generate Workforce Insights"
-                      buildPrompt={buildWorkforcePrompt}
-                    />
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                       <Card className="lg:col-span-2"><CardHeader><CardTitle>Recent Activity</CardTitle></CardHeader><CardContent><ul className="space-y-3">{activity.map((a) => <li key={a.id} className="flex items-center justify-between"><div>{a.text}</div><div className="text-xs text-muted-foreground">{a.time}</div></li>)}</ul></CardContent></Card>
                       <Card><CardHeader><CardTitle>Team Snapshot</CardTitle></CardHeader><CardContent>{teams.map((t) => <div key={t.id} className="flex items-center justify-between py-2"><div>{t.name}</div><div>{t.punctuality}%</div></div>)}</CardContent></Card>

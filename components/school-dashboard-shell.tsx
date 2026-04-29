@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { BookOpen, Users, ClipboardList, FileText, Settings, Plus, CalendarDays, Clock3, TrendingUp, AlertTriangle, CheckCircle2, Upload, PencilLine, School, Bell, LayoutDashboard } from "lucide-react"
+import { useMemo, useState } from "react"
+import { BookOpen, Users, ClipboardList, FileText, Settings, Plus, CalendarDays, Clock3, TrendingUp, AlertTriangle, CheckCircle2, Sparkles, Upload, PencilLine, School, Bell, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -13,7 +13,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { NotificationsPopover } from "@/components/notifications-popover"
-import { AIInsightsPanel } from "@/components/ai-insights-panel"
 
 type Section = "dashboard" | "classes" | "students" | "marks" | "reports" | "settings"
 type Performance = "Good" | "Average" | "At Risk"
@@ -71,39 +70,15 @@ const subjectColumns: Array<{ key: SubjectKey; label: string }> = [
   { key: "history", label: "History" },
 ]
 
-const initialClasses: SchoolClass[] = [
-  { id: "c1", name: "Class 10A", subject: "Mathematics", section: "10A", students: 32, attendance: 92, trend: [88, 90, 91, 93, 92] },
-  { id: "c2", name: "Class 9B", subject: "English", section: "9B", students: 28, attendance: 87, trend: [86, 87, 88, 86, 87] },
-  { id: "c3", name: "Class 8C", subject: "Science", section: "8C", students: 30, attendance: 78, trend: [82, 81, 79, 77, 78] },
-  { id: "c4", name: "Class 7A", subject: "Social Studies", section: "7A", students: 26, attendance: 95, trend: [94, 95, 96, 95, 95] },
-]
+const initialClasses: SchoolClass[] = []
 
-const initialStudents: Student[] = [
-  { id: "s1", name: "Aanya Sharma", rollNumber: "10A-01", className: "Class 10A", attendance: 96, lastPresent: "Today", performance: "Good" },
-  { id: "s2", name: "Rahul Verma", rollNumber: "10A-02", className: "Class 10A", attendance: 89, lastPresent: "Today", performance: "Good" },
-  { id: "s3", name: "Meera Iyer", rollNumber: "9B-06", className: "Class 9B", attendance: 81, lastPresent: "Yesterday", performance: "Average" },
-  { id: "s4", name: "Kabir Khan", rollNumber: "8C-11", className: "Class 8C", attendance: 72, lastPresent: "3 days ago", performance: "At Risk" },
-  { id: "s5", name: "Sara Joseph", rollNumber: "7A-09", className: "Class 7A", attendance: 94, lastPresent: "Today", performance: "Good" },
-]
+const initialStudents: Student[] = []
 
-const initialMarks: MarksRow[] = [
-  { id: "s1", studentName: "Aanya Sharma", className: "Class 10A", marks: { math: 92, english: 88, science: 90, history: 85 } },
-  { id: "s2", studentName: "Rahul Verma", className: "Class 10A", marks: { math: 84, english: 79, science: 86, history: 81 } },
-  { id: "s3", studentName: "Meera Iyer", className: "Class 9B", marks: { math: 76, english: 91, science: 80, history: 78 } },
-  { id: "s4", studentName: "Kabir Khan", className: "Class 8C", marks: { math: 68, english: 70, science: 74, history: 66 } },
-  { id: "s5", studentName: "Sara Joseph", className: "Class 7A", marks: { math: 95, english: 92, science: 94, history: 90 } },
-]
+const initialMarks: MarksRow[] = []
 
-const initialExams: Exam[] = [
-  { id: "e1", name: "Midterm Mathematics", subject: "Math", date: "2026-05-04", time: "09:30 AM", room: "Hall A" },
-  { id: "e2", name: "English Grammar Check", subject: "English", date: "2026-05-08", time: "11:00 AM", room: "Room 204" },
-]
+const initialExams: Exam[] = []
 
-const initialActivity = [
-  { id: "a1", title: "Attendance marked for Class 10A", detail: "32 students checked in", time: "5 minutes ago" },
-  { id: "a2", title: "New student added to Class 9B", detail: "Meera Iyer imported successfully", time: "42 minutes ago" },
-  { id: "a3", title: "Exam created for Class 8C", detail: "Science monthly test scheduled", time: "2 hours ago" },
-]
+const initialActivity: { id: string; title: string; detail: string; time: string }[] = []
 
 function getPerformanceBadgeClass(performance: Performance) {
   if (performance === "Good") return "bg-emerald-500/10 text-emerald-700 border-emerald-200"
@@ -162,24 +137,19 @@ export function SchoolDashboardShell() {
 
   const totalClasses = classes.length
   const totalStudents = students.length
-  const averageAttendance = Math.round(classes.reduce((sum, item) => sum + item.attendance, 0) / classes.length)
+  const averageAttendance = classes.length ? Math.round(classes.reduce((sum, item) => sum + item.attendance, 0) / classes.length) : 0
   const upcomingExams = exams.length
 
   const classOptions = classes.map((item) => item.name)
 
-  const buildSchoolPrompt = () => {
-    return `You are an AI school attendance assistant for a teacher dashboard.
+  const recentInsight = useMemo(() => {
+    if (classes.length === 0) {
+      return "No class data has been loaded yet."
+    }
 
-Summarize the current attendance data in one short paragraph and then give 3 recommendations.
-Mention patterns, classes needing attention, and any students or grades at risk.
-
-Classes: ${JSON.stringify(classes)}
-Students: ${JSON.stringify(students)}
-Exams: ${JSON.stringify(exams)}
-Activities: ${JSON.stringify(activities)}
-
-Keep the response concise and practical.`
-  }
+    const lowClass = classes.slice().sort((a, b) => a.attendance - b.attendance)[0]
+    return `${lowClass.name} has shown declining attendance on Mondays.`
+  }, [classes])
 
   const addActivity = (title: string, detail: string) => {
     setActivities((current) => [
@@ -478,24 +448,24 @@ Keep the response concise and practical.`
                       <CardDescription>What needs attention right now</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="rounded-2xl border bg-background p-4">
-                            <p className="text-xs text-muted-foreground">At Risk Students</p>
-                            <p className="mt-1 text-2xl font-semibold text-red-600">3</p>
-                          </div>
-                          <div className="rounded-2xl border bg-background p-4">
-                            <p className="text-xs text-muted-foreground">Perfect Attendance</p>
-                            <p className="mt-1 text-2xl font-semibold text-emerald-600">11</p>
-                          </div>
+                      <div className="rounded-2xl border border-orange-200/60 bg-background p-4">
+                        <div className="flex items-center gap-2 text-sm font-medium text-orange-700">
+                          <Sparkles className="h-4 w-4" />
+                          AI Insight
                         </div>
+                        <p className="mt-3 text-sm leading-6 text-muted-foreground">{recentInsight}</p>
+                      </div>
 
-                        <AIInsightsPanel
-                          compact
-                          title="AI Insight"
-                          description="Analyze current school attendance patterns"
-                          buttonLabel="Generate AI Insight"
-                          buildPrompt={buildSchoolPrompt}
-                        />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-2xl border bg-background p-4">
+                          <p className="text-xs text-muted-foreground">At Risk Students</p>
+                          <p className="mt-1 text-2xl font-semibold text-red-600">3</p>
+                        </div>
+                        <div className="rounded-2xl border bg-background p-4">
+                          <p className="text-xs text-muted-foreground">Perfect Attendance</p>
+                          <p className="mt-1 text-2xl font-semibold text-emerald-600">11</p>
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 </div>

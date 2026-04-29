@@ -2,143 +2,212 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, Camera, CheckCircle2, Save, ScanFace, Users } from "lucide-react"
+import { ArrowLeft, Camera, CheckCircle2, ScanFace, Users } from "lucide-react"
 import * as faceapi from "face-api.js"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { supabase } from "@/lib/supabase"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { getUser } from "@/lib/auth"
-import { descriptorToEmbedding, loadFaceRecognitionModels, parseFaceEmbedding } from "@/lib/face-api"
+import { loadFaceRecognitionModels } from "@/lib/face-api"
 
-interface StudentRow {
-  id: string
-  name?: string | null
-  email?: string | null
-  role?: string | null
-  org_type?: string | null
-  face_embedding?: number[] | string | null
+type ManualStudent = {
+  name: string
+  roll: string
 }
 
 export default function FaceEnrollmentPage() {
-  const [students, setStudents] = useState<StudentRow[]>([])
-  const [selectedStudentId, setSelectedStudentId] = useState<string>("")
-  const [cameraError, setCameraError] = useState<string | null>(null)
-  const [status, setStatus] = useState("Select a student to begin enrollment.")
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-  const [capturedImage, setCapturedImage] = useState<string | null>(null)
-  const [capturedDescriptor, setCapturedDescriptor] = useState<number[] | null>(null)
   const [adminLabel, setAdminLabel] = useState("Admin")
 
+  const [modelsLoading, setModelsLoading] = useState(true)
+  const [modelsError, setModelsError] = useState<string | null>(null)
+
+  const [manualName, setManualName] = useState("")
+  const [manualRoll, setManualRoll] = useState("")
+  const [importJson, setImportJson] = useState('[{"name":"Muhammad","roll":"CS-101"}]')
+  const [importError, setImportError] = useState<string | null>(null)
+
+  const [students, setStudents] = useState<ManualStudent[]>([])
+  const [selectedStudent, setSelectedStudent] = useState<ManualStudent | null>(null)
+
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [cameraActive, setCameraActive] = useState(false)
+  const [status, setStatus] = useState("Loading face models...")
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [isEnrolling, setIsEnrolling] = useState(false)
+  const [capturedImage, setCapturedImage] = useState<string | null>(null)
+
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const overlayRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const animationRef = useRef<number | null>(null)
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+    setCameraActive(false)
+  }
 
-  const selectedStudent = students.find((student) => student.id === selectedStudentId) ?? null
+  const startCamera = async () => {
+    setCameraError(null)
+    try {
+      stopCamera()
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      })
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        streamRef.current = stream
+        await videoRef.current.play()
+        setCameraActive(true)
+      }
+    } catch (error) {
+      console.error("Camera error:", error)
+      setCameraActive(false)
+      setCameraError("Camera access denied. Please allow access to enroll student faces.")
+    }
+  }
 
   useEffect(() => {
     let mounted = true
 
-    const loadData = async () => {
+    const boot = async () => {
       try {
         const currentUser = await getUser()
-        if (currentUser && mounted) {
+        if (mounted && currentUser) {
           setAdminLabel(currentUser.name || currentUser.email || "Admin")
         }
-
-        const query = supabase
-          .from("users")
-          .select("id, name, email, role, org_type, face_embedding")
-          .eq("role", "student")
-          .order("name", { ascending: true })
-
-        const { data, error } = await query
-
-        if (error) {
-          throw error
-        }
-
-        if (mounted) {
-          setStudents((data as StudentRow[]) || [])
-          setSelectedStudentId((data?.[0] as StudentRow | undefined)?.id || "")
-          setStatus(data?.length ? "Camera ready. Capture a face to save the embedding." : "No students were found in the database.")
-        }
       } catch (error) {
-        console.error("Student load error:", error)
-        if (mounted) {
-          setStatus("Unable to load students right now.")
-        }
-      } finally {
-        if (mounted) {
-          setIsLoading(false)
-        }
+        console.error("Admin label error:", error)
       }
-    }
 
-    const startCamera = async () => {
+      setModelsLoading(true)
+      setModelsError(null)
+      setStatus("Loading face models...")
       try {
-        setCameraError(null)
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false,
-        })
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          streamRef.current = stream
-          await videoRef.current.play()
+        await loadFaceRecognitionModels()
+        if (mounted) {
+          setModelsLoading(false)
+          setStatus(selectedStudent ? `Ready to enroll ${selectedStudent.name}.` : "Select a student from the list to begin enrollment.")
         }
       } catch (error) {
-        console.error("Camera error:", error)
-        setCameraError("Camera access denied. Please allow access to enroll student faces.")
+        console.error("Face model loading error:", error)
+        if (mounted) {
+          setModelsLoading(false)
+          setModelsError("Failed to load face models. Please refresh and try again.")
+          setStatus("Face models failed to load.")
+        }
       }
     }
 
-    void loadFaceRecognitionModels().then(() => {
-      if (mounted) {
-        void loadData()
-        void startCamera()
-      }
-    })
+    void boot()
 
     return () => {
       mounted = false
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop())
-      }
+      stopCamera()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
+    if (modelsLoading) return
     if (!selectedStudent) {
       setCapturedImage(null)
-      setCapturedDescriptor(null)
+      setSuccessMessage(null)
+      setStatus(students.length ? "Select a student from the list to begin enrollment." : "Add a student below to begin enrollment.")
+      return
+    }
+    setCapturedImage(null)
+    setSuccessMessage(null)
+    setStatus(`Ready to enroll ${selectedStudent.name}.`)
+  }, [selectedStudent, modelsLoading, students.length])
+
+  const handleAddStudent = () => {
+    setImportError(null)
+    const name = manualName.trim()
+    const roll = manualRoll.trim()
+    if (!name || !roll) {
+      setImportError("Student name and roll number are required.")
       return
     }
 
-    const existingEmbedding = parseFaceEmbedding(selectedStudent.face_embedding)
-    if (existingEmbedding) {
-      setStatus(`Existing face data found for ${selectedStudent.name || "this student"}. Capturing a new sample will replace it.`)
-    } else {
-      setStatus(`Ready to enroll ${selectedStudent.name || "this student"}.`)
-    }
-  }, [selectedStudent])
+    setStudents((current) => {
+      const withoutDuplicate = current.filter((s) => s.roll !== roll)
+      return [{ name, roll }, ...withoutDuplicate]
+    })
+    setManualName("")
+    setManualRoll("")
+  }
 
-  const captureFace = async () => {
-    if (!videoRef.current || !canvasRef.current || !overlayRef.current) {
+  const handleImportStudents = () => {
+    setImportError(null)
+    setSuccessMessage(null)
+    try {
+      const parsed = JSON.parse(importJson)
+      if (!Array.isArray(parsed)) {
+        throw new Error("JSON must be an array.")
+      }
+
+      const next: ManualStudent[] = parsed
+        .map((item: any) => ({
+          name: typeof item?.name === "string" ? item.name.trim() : "",
+          roll: typeof item?.roll === "string" ? item.roll.trim() : "",
+        }))
+        .filter((s: ManualStudent) => s.name && s.roll)
+
+      if (next.length === 0) {
+        throw new Error("No valid students found in JSON.")
+      }
+
+      setStudents((current) => {
+        const byRoll = new Map<string, ManualStudent>()
+        for (const s of current) byRoll.set(s.roll, s)
+        for (const s of next) byRoll.set(s.roll, s)
+        return Array.from(byRoll.values())
+      })
+    } catch (error) {
+      console.error("Import error:", error)
+      setImportError("Please provide valid JSON in the format: [{\"name\":\"Muhammad\",\"roll\":\"CS-101\"}].")
+    }
+  }
+
+  const handleSelectStudent = async (student: ManualStudent) => {
+    setSelectedStudent(student)
+    setSuccessMessage(null)
+    setCapturedImage(null)
+    setCameraError(null)
+
+    // Open the camera when a student is selected.
+    if (!cameraActive) {
+      await startCamera()
+    }
+  }
+
+  const captureAndEnroll = async () => {
+    if (!selectedStudent) {
+      setStatus("Select a student first.")
+      return
+    }
+    if (!videoRef.current || !overlayRef.current) {
+      setStatus("Camera is not ready yet.")
+      return
+    }
+    if (modelsLoading) {
+      setStatus("Loading face models...")
+      return
+    }
+    if (cameraError) {
+      setStatus("Camera access is denied.")
       return
     }
 
-    setIsSaving(false)
-    setCapturedDescriptor(null)
+    setIsEnrolling(true)
+    setSuccessMessage(null)
+    setCapturedImage(null)
     setStatus("Detecting face...")
 
     try {
@@ -146,31 +215,27 @@ export default function FaceEnrollmentPage() {
       const detection = await faceapi
         .detectSingleFace(
           videoRef.current,
-          new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 })
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }),
         )
         .withFaceLandmarks()
         .withFaceDescriptor()
 
-      const context = canvasRef.current.getContext("2d")
-      if (context && videoRef.current) {
-        canvasRef.current.width = videoRef.current.videoWidth
-        canvasRef.current.height = videoRef.current.videoHeight
-        context.drawImage(videoRef.current, 0, 0)
-        setCapturedImage(canvasRef.current.toDataURL("image/jpeg"))
+      // Snapshot current frame for preview.
+      const snapshotCanvas = document.createElement("canvas")
+      snapshotCanvas.width = videoRef.current.videoWidth || 640
+      snapshotCanvas.height = videoRef.current.videoHeight || 480
+      const snapshotCtx = snapshotCanvas.getContext("2d")
+      if (snapshotCtx) {
+        snapshotCtx.drawImage(videoRef.current, 0, 0, snapshotCanvas.width, snapshotCanvas.height)
+        setCapturedImage(snapshotCanvas.toDataURL("image/jpeg"))
       }
 
-      const overlay = overlayRef.current
-      const overlayContext = overlay.getContext("2d")
+      // Clear overlay (admin doesn't need live detection boxes here).
+      const overlayContext = overlayRef.current.getContext("2d")
       if (overlayContext && videoRef.current) {
-        overlay.width = videoRef.current.videoWidth
-        overlay.height = videoRef.current.videoHeight
-        overlayContext.clearRect(0, 0, overlay.width, overlay.height)
-        if (detection) {
-          const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight }
-          faceapi.matchDimensions(overlay, displaySize)
-          const resizedDetection = faceapi.resizeResults(detection.detection, displaySize)
-          faceapi.draw.drawDetections(overlay, resizedDetection)
-        }
+        overlayRef.current.width = videoRef.current.videoWidth
+        overlayRef.current.height = videoRef.current.videoHeight
+        overlayContext.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
       }
 
       if (!detection) {
@@ -178,48 +243,25 @@ export default function FaceEnrollmentPage() {
         return
       }
 
-      setCapturedDescriptor(descriptorToEmbedding(detection.descriptor))
-      setStatus("Face captured. Review the preview and save the enrollment.")
+      const faceDescriptor = Array.from(detection.descriptor)
+      localStorage.setItem(
+        selectedStudent.roll,
+        JSON.stringify({
+          name: selectedStudent.name,
+          roll: selectedStudent.roll,
+          faceDescriptor,
+        }),
+      )
+
+      setStatus("Enrollment saved.")
+      setSuccessMessage(`Face enrolled for ${selectedStudent.name}`)
     } catch (error) {
       console.error("Face capture error:", error)
       setStatus("Face capture failed. Please try again with better lighting.")
-    }
-  }
-
-  const handleSave = async () => {
-    if (!selectedStudentId || !capturedDescriptor) {
-      setStatus("Capture a valid face before saving.")
-      return
-    }
-
-    setIsSaving(true)
-    try {
-      const { error } = await supabase
-        .from("users")
-        .update({ face_embedding: capturedDescriptor })
-        .eq("id", selectedStudentId)
-
-      if (error) {
-        throw error
-      }
-
-      setStudents((current) =>
-        current.map((student) =>
-          student.id === selectedStudentId
-            ? { ...student, face_embedding: capturedDescriptor }
-            : student
-        )
-      )
-      setStatus("Face enrollment saved successfully.")
-    } catch (error) {
-      console.error("Face enrollment save error:", error)
-      setStatus("Unable to save the face embedding right now.")
     } finally {
-      setIsSaving(false)
+      setIsEnrolling(false)
     }
   }
-
-  const selectedFaceCount = capturedDescriptor?.length || parseFaceEmbedding(selectedStudent?.face_embedding)?.length || 0
 
   return (
     <div className="min-h-screen bg-muted/20">
@@ -249,14 +291,14 @@ export default function FaceEnrollmentPage() {
           <Card className="overflow-hidden">
             <CardHeader className="space-y-2">
               <CardTitle>Camera Preview</CardTitle>
-              <CardDescription>Keep the student centered in the frame, then capture the face.</CardDescription>
+              <CardDescription>Keep the student centered, then capture & enroll.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {cameraError ? (
                 <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 p-6 text-sm text-red-700">
                   {cameraError}
                 </div>
-              ) : (
+              ) : cameraActive ? (
                 <div className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-slate-950">
                   <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
                   <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
@@ -264,62 +306,133 @@ export default function FaceEnrollmentPage() {
                     <div className="h-72 w-56 rounded-[2rem] border-2 border-dashed border-white/60" />
                   </div>
                 </div>
+              ) : (
+                <div className="rounded-3xl border-2 border-dashed border-muted-foreground/40 bg-slate-950/30 p-10 text-center">
+                  <p className="text-sm text-muted-foreground">Click a student below to open the camera.</p>
+                </div>
               )}
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <Button onClick={captureFace} disabled={Boolean(cameraError) || isLoading || !selectedStudentId}>
+                <Button
+                  onClick={captureAndEnroll}
+                  disabled={!selectedStudent || Boolean(cameraError) || modelsLoading || !cameraActive || isEnrolling}
+                >
                   <Camera className="mr-2 h-4 w-4" />
-                  Capture Face
+                  {isEnrolling ? "Enrolling..." : "Capture & Enroll"}
                 </Button>
-                <Button variant="outline" onClick={handleSave} disabled={!capturedDescriptor || isSaving || isLoading}>
-                  <Save className="mr-2 h-4 w-4" />
-                  {isSaving ? "Saving..." : "Save Enrollment"}
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => {
+                    setSelectedStudent(null)
+                    setCapturedImage(null)
+                    setSuccessMessage(null)
+                    setStatus(students.length ? "Select a student from the list to begin enrollment." : "Add a student below to begin enrollment.")
+                  }}
+                  disabled={isEnrolling}
+                >
+                  Cancel
                 </Button>
               </div>
 
-              <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                {status}
+              <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground min-h-[48px]">
+                {modelsLoading ? "Loading face models..." : status}
               </div>
+
+              {modelsError ? (
+                <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {modelsError}
+                </div>
+              ) : null}
+
+              {successMessage ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                  <CheckCircle2 className="inline-block h-4 w-4 mr-2" />
+                  {successMessage}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Select Student</CardTitle>
-                <CardDescription>Choose a student before capturing a new face profile.</CardDescription>
+                <CardTitle>Add Students</CardTitle>
+                <CardDescription>Manually add students or import them from JSON.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="student-select">Student</Label>
-                  <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
-                    <SelectTrigger id="student-select">
-                      <SelectValue placeholder="Select a student" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {students.map((student) => {
-                        const label = student.name || student.email || student.id
-                        return (
-                          <SelectItem key={student.id} value={student.id}>
-                            {label}
-                          </SelectItem>
-                        )
-                      })}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="manual-student-name">Student Name</Label>
+                    <Input
+                      id="manual-student-name"
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                      placeholder="e.g., Muhammad"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="manual-student-roll">Roll Number</Label>
+                    <Input
+                      id="manual-student-roll"
+                      value={manualRoll}
+                      onChange={(e) => setManualRoll(e.target.value)}
+                      placeholder="e.g., CS-101"
+                    />
+                  </div>
+                  <Button type="button" onClick={handleAddStudent} disabled={!manualName.trim() || !manualRoll.trim()}>
+                    Add Student
+                  </Button>
                 </div>
 
-                {selectedStudent ? (
-                  <div className="rounded-2xl border bg-background p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-foreground">{selectedStudent.name || selectedStudent.email || "Student"}</p>
-                        <p className="text-sm text-muted-foreground">{selectedStudent.email || "No email available"}</p>
-                      </div>
-                      <Badge variant="outline">{selectedFaceCount > 0 ? `${selectedFaceCount} values` : "Not enrolled"}</Badge>
+                <div className="space-y-3">
+                  <Label htmlFor="student-import-json">Import Students (JSON)</Label>
+                  <Textarea
+                    id="student-import-json"
+                    value={importJson}
+                    onChange={(e) => setImportJson(e.target.value)}
+                    rows={4}
+                  />
+                  <Button type="button" variant="outline" onClick={handleImportStudents}>
+                    Import
+                  </Button>
+                  {importError ? (
+                    <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {importError}
                     </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Manually added students</Label>
+                    <Badge variant="outline">{students.length}</Badge>
                   </div>
-                ) : null}
+                  {students.length ? (
+                    <div className="space-y-2">
+                      {students.map((student) => {
+                        const active = selectedStudent?.roll === student.roll
+                        return (
+                          <Button
+                            key={student.roll}
+                            type="button"
+                            variant={active ? "default" : "outline"}
+                            className="w-full justify-start"
+                            onClick={() => void handleSelectStudent(student)}
+                            disabled={isEnrolling}
+                          >
+                            <div className="flex w-full items-center justify-between gap-3">
+                              <span className="truncate">{student.name}</span>
+                              <span className="shrink-0 text-xs text-muted-foreground">{student.roll}</span>
+                            </div>
+                          </Button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No students added yet. Use the form above.</p>
+                  )}
+                </div>
               </CardContent>
             </Card>
 

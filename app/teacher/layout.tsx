@@ -10,7 +10,10 @@ export default function TeacherLayout({
 }) {
   return (
     <SidebarProvider defaultOpen={true}>
-      <OrgAwareSidebar role="teacher" />
+      <OrgAwareSidebar 
+        role="teacher" 
+        user={{ name: "Dr. Sarah Mitchell", email: "sarah.mitchell@university.edu" }}
+      />
       <SidebarInset>
         <header className="flex h-14 items-center gap-4 border-b bg-background px-6">
           <SidebarTrigger className="-ml-2" />

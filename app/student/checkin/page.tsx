@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { getUser } from "@/lib/auth"
-import { embeddingToDescriptor, loadFaceRecognitionModels, parseFaceEmbedding } from "@/lib/face-api"
+import { loadFaceRecognitionModels } from "@/lib/face-api"
 
 const sentimentOptions = [
   { id: "focused", label: "Focused", icon: Smile, color: "text-green-600", bgColor: "bg-green-50 border-green-200" },
@@ -22,10 +22,8 @@ function StudentCheckinPageInner() {
   const searchParams = useSearchParams()
   const [stage, setStage] = useState<"camera" | "success">("camera")
   const [selectedSentiment, setSelectedSentiment] = useState<string | null>(null)
-  const [isCapturing, setIsCapturing] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [checkinError, setCheckinError] = useState<string | null>(null)
-  const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionTitle, setSessionTitle] = useState("Introduction to Computer Science")
   const [sessionSubTitle, setSessionSubTitle] = useState("Room 101 • Dr. Sarah Mitchell")
@@ -34,16 +32,24 @@ function StudentCheckinPageInner() {
   const [studentRollNumber, setStudentRollNumber] = useState<string>("")
   const [checkinId, setCheckinId] = useState<string | null>(null)
   const [presenceStatus, setPresenceStatus] = useState<"online" | "offline">("online")
-  const [faceEmbedding, setFaceEmbedding] = useState<number[] | null>(null)
+  const [modelsLoading, setModelsLoading] = useState(true)
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [bestMatch, setBestMatch] = useState<{
+    name: string
+    roll: string
+    distance: number
+    matchPercent: number
+  } | null>(null)
+  const [isMarking, setIsMarking] = useState(false)
   const [faceVerified, setFaceVerified] = useState(false)
   const [faceMessage, setFaceMessage] = useState("Position your face in the frame to verify attendance.")
   const [faceDistance, setFaceDistance] = useState<number | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const recognitionLoopRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const recognitionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const recognitionRunningRef = useRef(false)
 
   const sessionToken = searchParams.get("token")
 
@@ -62,9 +68,6 @@ function StudentCheckinPageInner() {
         setStudentId(userProfile.id)
         setStudentName(userProfile.name || "Student")
         setStudentRollNumber(String((userProfile as { roll_number?: string; rollNumber?: string }).roll_number ?? (userProfile as { roll_number?: string; rollNumber?: string }).rollNumber ?? userProfile.id))
-
-        const storedFaceEmbedding = parseFaceEmbedding(userProfile.face_embedding)
-        setFaceEmbedding(storedFaceEmbedding)
 
         const { data: sessionData, error: sessionError } = await supabase
           .from("sessions")
@@ -122,97 +125,232 @@ function StudentCheckinPageInner() {
     }
   }, [])
 
+  // Load face-api.js models exactly once before any detection happens.
+  useEffect(() => {
+    let mounted = true
+
+    const bootModels = async () => {
+      setModelsLoading(true)
+      setModelsError(null)
+      setFaceVerified(false)
+      setBestMatch(null)
+      setFaceDistance(null)
+      setFaceMessage("Loading face models...")
+
+      try {
+        await loadFaceRecognitionModels()
+        if (!mounted) return
+        setModelsLoading(false)
+        setFaceMessage("Position your face in the frame to verify attendance.")
+      } catch (error) {
+        console.error("Face model loading error:", error)
+        if (!mounted) return
+        setModelsLoading(false)
+        setModelsError("Failed to load face models.")
+        setFaceMessage("Face models failed to load.")
+      }
+    }
+
+    void bootModels()
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   useEffect(() => {
     if (stage !== "camera") return
+    if (modelsLoading) return
+    if (modelsError) return
 
     let cancelled = false
 
     const clearOverlay = () => {
-      if (overlayRef.current) {
-        const context = overlayRef.current.getContext("2d")
-        context?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
+      if (!overlayRef.current) return
+      const context = overlayRef.current.getContext("2d")
+      context?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
+    }
+
+    const loadEnrolledFaces = (): Array<{ name: string; roll: string; descriptor: Float32Array }> => {
+      try {
+        const faces: Array<{ name: string; roll: string; descriptor: Float32Array }> = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (!key) continue
+          const raw = localStorage.getItem(key)
+          if (!raw) continue
+
+          let parsed: any = null
+          try {
+            parsed = JSON.parse(raw)
+          } catch {
+            continue
+          }
+
+          const faceDescriptor = parsed?.faceDescriptor
+          if (
+            parsed &&
+            typeof parsed.name === "string" &&
+            typeof parsed.roll === "string" &&
+            Array.isArray(faceDescriptor) &&
+            faceDescriptor.length === 128 &&
+            faceDescriptor.every((n: unknown) => typeof n === "number")
+          ) {
+            faces.push({
+              name: parsed.name,
+              roll: parsed.roll,
+              descriptor: new Float32Array(faceDescriptor),
+            })
+          }
+        }
+        return faces
+      } catch {
+        return []
       }
     }
 
-    const runRecognition = async () => {
-      if (cancelled) return
+    const drawLabel = (params: {
+      context: CanvasRenderingContext2D
+      box: { x: number; y: number; width: number; height: number }
+      text: string
+      tone: "match" | "unknown"
+    }) => {
+      const { context, box, text, tone } = params
+      const green = "rgba(16, 185, 129, 1)"
+      const red = "rgba(239, 68, 68, 1)"
+      const toneColor = tone === "match" ? green : red
 
-      if (!videoRef.current || !overlayRef.current || videoRef.current.readyState < 2) {
-        recognitionLoopRef.current = setTimeout(runRecognition, 600)
-        return
-      }
+      context.strokeStyle = toneColor
+      context.lineWidth = 2
+      context.strokeRect(box.x, box.y, box.width, box.height)
 
-      if (!faceEmbedding) {
-        setFaceVerified(true)
-        setFaceDistance(null)
-        setFaceMessage("No face embedding found. You can continue with a warning.")
-        clearOverlay()
-        recognitionLoopRef.current = setTimeout(runRecognition, 1200)
-        return
-      }
+      context.font = "14px Arial"
+      const padding = 4
+      const textMetrics = context.measureText(text)
+      const labelWidth = textMetrics.width + padding * 2
+      const labelHeight = 18
 
-      try {
-        await loadFaceRecognitionModels()
-        const detection = await faceapi
-          .detectSingleFace(
-            videoRef.current,
-            new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 })
-          )
-          .withFaceLandmarks()
-          .withFaceDescriptor()
+      const labelX = Math.max(0, box.x)
+      const insideY = box.y + Math.min(16, box.height - 4)
+      const labelY = insideY > box.y ? insideY : box.y + box.height + 2
 
+      context.fillStyle = "rgba(0,0,0,0.45)"
+      context.fillRect(labelX, labelY - labelHeight + 2, labelWidth, labelHeight)
+
+      context.fillStyle = toneColor
+      context.fillText(text, labelX + padding, labelY + 4)
+    }
+
+    recognitionIntervalRef.current = setInterval(() => {
+      void (async () => {
         if (cancelled) return
+        if (recognitionRunningRef.current) return
+        if (!videoRef.current || !overlayRef.current || videoRef.current.readyState < 2) return
 
-        const overlay = overlayRef.current
-        const overlayContext = overlay.getContext("2d")
-        if (overlayContext && videoRef.current) {
-          overlay.width = videoRef.current.videoWidth
-          overlay.height = videoRef.current.videoHeight
-          overlayContext.clearRect(0, 0, overlay.width, overlay.height)
+        recognitionRunningRef.current = true
+        try {
+          const enrolledFaces = loadEnrolledFaces()
 
-          if (detection) {
-            const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight }
-            faceapi.matchDimensions(overlay, displaySize)
-            const resizedDetection = faceapi.resizeResults(detection.detection, displaySize)
-            faceapi.draw.drawDetections(overlay, resizedDetection)
-          }
-        }
+          const detections = await faceapi
+            .detectAllFaces(
+              videoRef.current,
+              new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }),
+            )
+            .withFaceLandmarks()
+            .withFaceDescriptors()
 
-        if (!detection) {
-          setFaceVerified(false)
-          setFaceDistance(null)
-          setFaceMessage("No face detected yet. Keep your face inside the guide.")
-        } else {
-          const distance = faceapi.euclideanDistance(embeddingToDescriptor(faceEmbedding), detection.descriptor)
-          setFaceDistance(distance)
-          if (distance <= 0.5) {
-            setFaceVerified(true)
-            setFaceMessage(`${studentName} • ${studentRollNumber || "No roll number"}`)
-          } else {
+          if (cancelled) return
+
+          const overlay = overlayRef.current
+          const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight }
+          overlay.width = displaySize.width
+          overlay.height = displaySize.height
+
+          const context = overlay.getContext("2d")
+          if (!context) return
+          context.clearRect(0, 0, overlay.width, overlay.height)
+
+          if (!detections || detections.length === 0) {
+            setBestMatch(null)
             setFaceVerified(false)
+            setFaceDistance(null)
+            setFaceMessage("No face detected yet. Keep your face inside the guide.")
+            return
+          }
+
+          const resizedDetections = faceapi.resizeResults(detections, displaySize) as any[]
+
+          let nextBest: { name: string; roll: string; distance: number; matchPercent: number } | null = null
+
+          for (const det of resizedDetections) {
+            const box = det.detection.box
+            const descriptor = det.descriptor as Float32Array
+
+            let labelText = "Unknown"
+            let tone: "match" | "unknown" = "unknown"
+
+            if (enrolledFaces.length > 0) {
+              let closest: { distance: number; face: (typeof enrolledFaces)[number] } | null = null
+              for (const enrolled of enrolledFaces) {
+                const distance = faceapi.euclideanDistance(descriptor, enrolled.descriptor)
+                if (!closest || distance < closest.distance) {
+                  closest = { distance, face: enrolled }
+                }
+              }
+
+              if (closest && closest.distance < 0.5) {
+                const matchPercent = Math.round((1 - closest.distance) * 100)
+                labelText = `${closest.face.name} — ${closest.face.roll} — ${matchPercent}% match`
+                tone = "match"
+
+                if (!nextBest || closest.distance < nextBest.distance) {
+                  nextBest = {
+                    name: closest.face.name,
+                    roll: closest.face.roll,
+                    distance: closest.distance,
+                    matchPercent,
+                  }
+                }
+              }
+            }
+
+            drawLabel({
+              context,
+              box,
+              text: labelText,
+              tone,
+            })
+          }
+
+          setBestMatch(nextBest)
+          setFaceVerified(Boolean(nextBest))
+          setFaceDistance(nextBest?.distance ?? null)
+          if (nextBest) {
+            setFaceMessage(`${nextBest.name} — ${nextBest.roll} — ${nextBest.matchPercent}% match`)
+          } else {
             setFaceMessage("Face not recognized")
           }
+        } catch (error) {
+          console.error("Face recognition error:", error)
+          setBestMatch(null)
+          setFaceVerified(false)
+          setFaceDistance(null)
+          setFaceMessage("Face recognition is temporarily unavailable. Please try again.")
+        } finally {
+          recognitionRunningRef.current = false
         }
-      } catch (error) {
-        console.error("Face recognition error:", error)
-        setFaceVerified(false)
-        setFaceMessage("Face recognition is temporarily unavailable. You can retry or continue without a saved embedding.")
-      }
-
-      recognitionLoopRef.current = setTimeout(runRecognition, 800)
-    }
-
-    void runRecognition()
+      })()
+    }, 500)
 
     return () => {
       cancelled = true
-      if (recognitionLoopRef.current) {
-        clearTimeout(recognitionLoopRef.current)
-        recognitionLoopRef.current = null
+      if (recognitionIntervalRef.current) {
+        clearInterval(recognitionIntervalRef.current)
+        recognitionIntervalRef.current = null
       }
       clearOverlay()
     }
-  }, [stage, faceEmbedding, studentName, studentRollNumber])
+  }, [stage, modelsLoading, modelsError])
 
   useEffect(() => {
     if (stage !== "success" || !sessionId || !studentId) return
@@ -252,69 +390,75 @@ function StudentCheckinPageInner() {
     }
   }, [stage, sessionId, studentId])
 
-  const handleCapture = async () => {
-    if (!videoRef.current || !canvasRef.current) return
-
-    setIsCapturing(true)
-
-    // Draw current video frame to canvas
-    const context = canvasRef.current.getContext("2d")
-    if (context && videoRef.current) {
-      canvasRef.current.width = videoRef.current.videoWidth
-      canvasRef.current.height = videoRef.current.videoHeight
-      context.drawImage(videoRef.current, 0, 0)
-      const imageData = canvasRef.current.toDataURL("image/jpeg")
-      setCapturedImage(imageData)
+  const resolveUserIdByRoll = async (roll: string) => {
+    try {
+      const { data, error } = await supabase.from("users").select("id").eq("roll_number", roll).single()
+      if (!error && data?.id) return data.id
+    } catch (error) {
+      console.error("roll_number lookup error:", error)
     }
 
-    // Simulate processing delay
-    await new Promise(resolve => setTimeout(resolve, 500))
-    setIsCapturing(false)
-
-    if (faceEmbedding && !faceVerified) {
-      setCheckinError("Please wait for face verification to complete before confirming attendance.")
+    try {
+      const { data, error } = await supabase.from("users").select("id").eq("rollNumber", roll).single()
+      if (!error && data?.id) return data.id
+    } catch (error) {
+      console.error("rollNumber lookup error:", error)
     }
+
+    return null
   }
 
-  const handleLooksGood = async () => {
-    if (faceEmbedding && !faceVerified) {
+  const handleMarkAttendance = async () => {
+    if (!bestMatch || bestMatch.matchPercent <= 50) {
       setCheckinError("Face not recognized")
       return
     }
 
-    setIsCapturing(true)
-    // Simulate face verification delay
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    setIsCapturing(false)
-    if (!sessionId || !studentId) {
+    if (!sessionId) {
       setCheckinError("Unable to mark attendance. Please reopen the check-in link.")
       return
     }
 
+    setIsMarking(true)
     setCheckinError(null)
 
-    const { data: checkinRow, error } = await supabase
-      .from("checkins")
-      .insert({
-        student_id: studentId,
-        session_id: sessionId,
-      })
-      .select("id")
-      .single()
+    try {
+      const matchedStudentId = await resolveUserIdByRoll(bestMatch.roll)
+      if (!matchedStudentId) {
+        setCheckinError("Unable to find student for the matched roll number.")
+        return
+      }
 
-    if (error || !checkinRow) {
+      // Ensure the presence and check-in record reference the matched face.
+      setStudentId(matchedStudentId)
+      setStudentName(bestMatch.name)
+      setStudentRollNumber(bestMatch.roll)
+      setFaceVerified(true)
+      setFaceDistance(bestMatch.distance)
+
+      const { data: checkinRow, error } = await supabase
+        .from("checkins")
+        .insert({
+          student_id: matchedStudentId,
+          session_id: sessionId,
+        })
+        .select("id")
+        .single()
+
+      if (error || !checkinRow) {
+        setCheckinError("Could not save your check-in. Please try again.")
+        console.error("Check-in error:", error)
+        return
+      }
+
+      setCheckinId(checkinRow.id)
+      setStage("success")
+    } catch (error) {
+      console.error("Attendance mark error:", error)
       setCheckinError("Could not save your check-in. Please try again.")
-      console.error("Check-in error:", error)
-      return
+    } finally {
+      setIsMarking(false)
     }
-
-    setCheckinId(checkinRow.id)
-    setStage("success")
-  }
-
-  const handleRetake = () => {
-    setCapturedImage(null)
-    setCheckinError(null)
   }
 
   const handleSentimentSelect = async (sentiment: string) => {
@@ -347,17 +491,13 @@ function StudentCheckinPageInner() {
 
           <Card>
             <CardContent className="p-6 space-y-4">
-              {faceVerified && faceEmbedding ? (
+              {faceVerified ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
                   {studentName} • {studentRollNumber || "No roll number"}
                 </div>
-              ) : faceEmbedding ? (
+              ) : (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
                   Face not recognized
-                </div>
-              ) : (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
-                  No face embedding found. You can continue with a warning.
                 </div>
               )}
 
@@ -440,46 +580,6 @@ function StudentCheckinPageInner() {
                   <p className="text-sm text-red-800 font-medium">{cameraError}</p>
                 </CardContent>
               </Card>
-            ) : capturedImage ? (
-              <>
-                {/* Captured image preview */}
-                <div className="relative aspect-[3/4] bg-muted rounded-2xl overflow-hidden">
-                  <img 
-                    src={capturedImage} 
-                    alt="Captured face" 
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <Button 
-                    onClick={handleLooksGood} 
-                    className="w-full h-14 text-lg"
-                    disabled={isCapturing}
-                  >
-                    {isCapturing ? (
-                      <>
-                        <div className="h-5 w-5 mr-2 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                        Verifying...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="h-5 w-5 mr-2" />
-                        Looks Good
-                      </>
-                    )}
-                  </Button>
-                  <Button 
-                    onClick={handleRetake} 
-                    variant="outline"
-                    className="w-full h-14 text-lg"
-                    disabled={isCapturing}
-                  >
-                    <Camera className="h-5 w-5 mr-2" />
-                    Retake
-                  </Button>
-                </div>
-              </>
             ) : (
               <>
                 {/* Live camera feed */}
@@ -492,7 +592,7 @@ function StudentCheckinPageInner() {
                     className="w-full h-full object-cover"
                   />
                   <canvas ref={overlayRef} className="absolute inset-0 h-full w-full pointer-events-none" />
-                  
+
                   {/* Face outline guide overlay */}
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div className="w-48 h-60 border-2 border-dashed border-primary/50 rounded-[100px] relative">
@@ -509,39 +609,33 @@ function StudentCheckinPageInner() {
                   </div>
                 </div>
 
-                <div className={cn(
-                  "rounded-2xl border px-4 py-3 text-sm",
-                  !faceEmbedding
-                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                    : faceVerified
-                      ? "border-green-200 bg-green-50 text-green-700"
-                      : "border-red-200 bg-red-50 text-red-700",
-                )}>
-                    {faceMessage}
-                    {faceVerified && faceEmbedding ? (
-                      <span className="ml-2 font-medium">Verified</span>
-                    ) : faceDistance !== null ? (
-                      <span className="ml-2 font-medium">({faceDistance.toFixed(2)})</span>
-                    ) : null}
+                <div
+                  className={cn(
+                    "rounded-2xl border px-4 py-3 text-sm",
+                    modelsLoading
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : bestMatch && bestMatch.matchPercent > 50
+                        ? "border-green-200 bg-green-50 text-green-700"
+                        : "border-red-200 bg-red-50 text-red-700",
+                  )}
+                >
+                  {modelsLoading ? "Loading face models..." : faceMessage}
                 </div>
 
-                {/* Hidden canvas for capturing frames */}
-                <canvas ref={canvasRef} className="hidden" />
-
-                <Button 
-                  onClick={handleCapture} 
+                <Button
+                  onClick={handleMarkAttendance}
                   className="w-full h-14 text-lg"
-                  disabled={isCapturing}
+                  disabled={!bestMatch || bestMatch.matchPercent <= 50 || isMarking || modelsLoading || Boolean(cameraError)}
                 >
-                  {isCapturing ? (
+                  {isMarking ? (
                     <>
                       <div className="h-5 w-5 mr-2 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                      Capturing...
+                      Marking...
                     </>
                   ) : (
                     <>
-                      <Camera className="h-5 w-5 mr-2" />
-                      Capture & Verify
+                      <CheckCircle className="h-5 w-5 mr-2" />
+                      Mark Attendance
                     </>
                   )}
                 </Button>

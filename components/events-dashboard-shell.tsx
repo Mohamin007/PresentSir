@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label"
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { NotificationsPopover } from "@/components/notifications-popover"
-import { AIInsightsPanel } from "@/components/ai-insights-panel"
 
 type OrganizerSection = "dashboard" | "events" | "registrations" | "checkin" | "reports" | "settings"
 type AttendeeSection = "discover" | "registrations" | "settings"
@@ -47,15 +46,9 @@ export function EventsDashboardShell({ userRole }: { userRole: string }) {
   const [organizerSection, setOrganizerSection] = useState<OrganizerSection>("dashboard")
   const [attendeeSection, setAttendeeSection] = useState<AttendeeSection>("discover")
 
-  const [events, setEvents] = useState<EventItem[]>([
-    { id: "ev1", name: "Tech Summit 2026", date: "2026-06-10", time: "09:30", location: "Convention Hall A", capacity: 200, registrationCount: 34, status: "Upcoming", code: "TS-2026" },
-    { id: "ev2", name: "Design Meetup", date: "2026-05-15", time: "17:00", location: "Room B", capacity: 80, registrationCount: 12, status: "Upcoming", code: "DM-0526" },
-  ])
+  const [events, setEvents] = useState<EventItem[]>([])
 
-  const [registrants, setRegistrants] = useState<Registrant[]>([
-    { id: "r1", eventId: "ev1", name: "Asha Verma", email: "asha@example.com", time: "2026-04-20T10:05:00", status: "Confirmed" },
-    { id: "r2", eventId: "ev1", name: "Raj Kapoor", email: "raj@example.com", time: "2026-04-21T12:12:00", status: "Confirmed" },
-  ])
+  const [registrants, setRegistrants] = useState<Registrant[]>([])
 
   const [eventDialogOpen, setEventDialogOpen] = useState(false)
   const [eventForm, setEventForm] = useState({ name: "", description: "", date: "", time: "", location: "", capacity: 100, paid: false })
@@ -68,20 +61,6 @@ export function EventsDashboardShell({ userRole }: { userRole: string }) {
 
   const [selectedEventForRegistration, setSelectedEventForRegistration] = useState<EventItem | null>(null)
   const [myRegistrations, setMyRegistrations] = useState<Registrant[]>([])
-
-  const buildEventSummaryPrompt = () => {
-    return `You are an AI event analyst for a conferences dashboard.
-
-Summarize the event attendance data below in a short paragraph and then give 3 suggestions for future events.
-Focus on turnout, engagement, no-shows, and registration patterns.
-
-Events: ${JSON.stringify(events)}
-Registrants: ${JSON.stringify(registrants)}
-Check-ins: ${JSON.stringify(checkedIn)}
-Live feed: ${JSON.stringify(liveFeed)}
-
-Keep the response concise and practical.`
-  }
 
   useEffect(() => {
     // initialize checkedIn counters
@@ -223,14 +202,6 @@ Keep the response concise and practical.`
                   <div>
                     <h2 className="text-lg font-semibold mb-4">Reports</h2>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">{events.map(ev => <Card key={ev.id}><CardHeader><CardTitle>{ev.name}</CardTitle></CardHeader><CardContent><div className="text-sm">Registered: {ev.registrationCount} • Checked in: {checkedIn[ev.id]||0} • No-show: {Math.max(0, ev.registrationCount - (checkedIn[ev.id]||0))}</div></CardContent></Card>)}</div>
-                    <div className="mt-6">
-                      <AIInsightsPanel
-                        title="AI Event Summary"
-                        description="Analyze turnout, engagement, and future event suggestions"
-                        buttonLabel="Generate Event Summary"
-                        buildPrompt={buildEventSummaryPrompt}
-                      />
-                    </div>
                   </div>
                 )}
 
