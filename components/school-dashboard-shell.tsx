@@ -140,7 +140,8 @@ export function SchoolDashboardShell() {
   const averageAttendance = classes.length ? Math.round(classes.reduce((sum, item) => sum + item.attendance, 0) / classes.length) : 0
   const upcomingExams = exams.length
 
-  const classOptions = classes.map((item) => item.name)
+  const defaultClassOptions = Array.from({ length: 12 }, (_, i) => `Class ${i + 1}`)
+  const classOptions = classes.length > 0 ? classes.map((item) => item.name) : defaultClassOptions
 
   const recentInsight = useMemo(() => {
     if (classes.length === 0) {

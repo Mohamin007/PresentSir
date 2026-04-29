@@ -46,6 +46,13 @@ export default function StartSessionPage() {
   const [activeSession, setActiveSession] = useState<any>(null)
   const [selectedRoom, setSelectedRoom] = useState("")
   const [roomsList, setRoomsList] = useState<any[]>([])
+  const fallbackRooms = [
+    { id: "room-fallback-1", name: "Introduction to Programming", subject: "CS101" },
+    { id: "room-fallback-2", name: "Data Structures", subject: "CS201" },
+    { id: "room-fallback-3", name: "Web Development", subject: "CS301" },
+    { id: "room-fallback-4", name: "Database Systems", subject: "CS202" },
+  ]
+  const effectiveRooms = roomsList.length > 0 ? roomsList : fallbackRooms
   const [duration, setDuration] = useState("60")
   const [faceVerification, setFaceVerification] = useState(true)
   const [gpsCheck, setGpsCheck] = useState(true)
@@ -189,7 +196,7 @@ export default function StartSessionPage() {
     setQrImage('')
   }
 
-  const selectedRoomData = roomsList.find((r) => r.id === selectedRoom)
+  const selectedRoomData = effectiveRooms.find((r) => r.id === selectedRoom)
   const liveStudents = liveSessionStudents.map((student) => ({
     ...student,
     presenceStatus: presenceByStudent[student.id] ?? student.presenceStatus,
@@ -302,7 +309,7 @@ export default function StartSessionPage() {
                   className="border-input rounded-md px-3 py-2 text-sm w-full bg-transparent"
                 >
                   <option value="">Choose a room</option>
-                  {roomsList.map((room) => (
+                  {effectiveRooms.map((room) => (
                     <option key={room.id} value={room.id}>{room.name} ({room.subject})</option>
                   ))}
                 </select>
