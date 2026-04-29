@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { Suspense, useState, useRef, useEffect } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Camera, MapPin, CheckCircle, Scan, ArrowLeft, Smile, Meh, Frown } from "lucide-react"
@@ -18,7 +18,7 @@ const sentimentOptions = [
   { id: "lost", label: "Lost", icon: Frown, color: "text-red-500", bgColor: "bg-red-50 border-red-200" },
 ]
 
-export default function StudentCheckinPage() {
+function StudentCheckinPageInner() {
   const searchParams = useSearchParams()
   const [stage, setStage] = useState<"camera" | "success">("camera")
   const [selectedSentiment, setSelectedSentiment] = useState<string | null>(null)
@@ -559,5 +559,13 @@ export default function StudentCheckinPage() {
         ) : null}
       </div>
     </div>
+  )
+}
+
+export default function StudentCheckinPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <StudentCheckinPageInner />
+    </Suspense>
   )
 }
