@@ -51,20 +51,20 @@ export default function FaceEnrollmentPage() {
   }
 
   const startCamera = async () => {
+    if (typeof window === "undefined") return
     setCameraError(null)
     try {
       stopCamera()
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      })
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true })
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        streamRef.current = stream
-        await videoRef.current.play()
-        setCameraActive(true)
-      }
+      const videoEl = videoRef.current
+      if (!videoEl) throw new Error("Video element not ready.")
+
+      // Assign stream directly to the video element (required for immediate preview).
+      videoEl.srcObject = stream
+      streamRef.current = stream
+      await videoEl.play()
+      setCameraActive(true)
     } catch (error) {
       console.error("Camera error:", error)
       setCameraActive(false)
@@ -182,9 +182,7 @@ export default function FaceEnrollmentPage() {
     setCameraError(null)
 
     // Open the camera when a student is selected.
-    if (!cameraActive) {
-      await startCamera()
-    }
+    if (typeof window !== "undefined" && !cameraActive) void startCamera()
   }
 
   const captureAndEnroll = async () => {
@@ -298,17 +296,19 @@ export default function FaceEnrollmentPage() {
                 <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 p-6 text-sm text-red-700">
                   {cameraError}
                 </div>
-              ) : cameraActive ? (
+              ) : (
                 <div className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-slate-950">
                   <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
                   <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <div className="h-72 w-56 rounded-[2rem] border-2 border-dashed border-white/60" />
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-3xl border-2 border-dashed border-muted-foreground/40 bg-slate-950/30 p-10 text-center">
-                  <p className="text-sm text-muted-foreground">Click a student below to open the camera.</p>
+                  {cameraActive ? (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <div className="h-72 w-56 rounded-[2rem] border-2 border-dashed border-white/60" />
+                    </div>
+                  ) : (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8 text-center">
+                      <p className="text-sm text-muted-foreground">Click a student below to open the camera.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
