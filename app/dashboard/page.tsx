@@ -104,7 +104,7 @@ function GenericDashboard({ orgType, userRole, onLogout }: { orgType: OrgType; u
 
   return (
     <SidebarProvider defaultOpen={true}>
-      <OrgAwareSidebar role={sidebarRole} user={{ name: "PresentSir User", email: "user@example.com" }} />
+      <OrgAwareSidebar role={sidebarRole} />
       <SidebarInset>
         <div className="min-h-screen bg-gradient-to-b from-background to-muted/10">
           <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">

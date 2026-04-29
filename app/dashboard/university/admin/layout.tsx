@@ -10,10 +10,7 @@ export default function UniversityAdminLayout({
 }) {
   return (
     <SidebarProvider defaultOpen={true}>
-      <OrgAwareSidebar
-        role="admin"
-        user={{ name: "Dr. Robert Hayes", email: "r.hayes@university.edu" }}
-      />
+      <OrgAwareSidebar role="admin" />
       <SidebarInset>
         <header className="flex h-14 items-center gap-4 border-b bg-background px-6">
           <SidebarTrigger className="-ml-2" />

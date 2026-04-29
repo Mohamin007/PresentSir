@@ -165,13 +165,7 @@ export function AppSidebar({ role, orgType, orgName, user }: AppSidebarProps) {
     navItems = studentNavItems
   }
 
-  const defaultUsers = {
-    admin: { name: "Dr. Robert Hayes", email: "r.hayes@university.edu" },
-    teacher: { name: "Dr. Sarah Mitchell", email: "sarah.mitchell@university.edu" },
-    student: { name: "Alex Johnson", email: "alex@university.edu" },
-  }
-
-  const currentUser = user || (role ? defaultUsers[role] : { name: "User", email: "user@example.com" })
+  const currentUser = user || { name: "User", email: "" }
   const OrgIcon = orgType ? orgTypeConfig[orgType].icon : GraduationCap
 
   return (
